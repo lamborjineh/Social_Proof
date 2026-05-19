@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SocialProof — My Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/pages/styles.css">
+<style>
+/* ── Tree Panel ─────────────────────────────────────────────── */
+#tree-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  width: 260px;
+  height: 100vh;
+  background: var(--surface, #0d0d12);
+  border-left: 1px solid var(--border, rgba(255,255,255,.08));
+  display: flex;
+  flex-direction: column;
+  z-index: 120;
+  overflow: hidden;
+  transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+}
+#tree-panel.collapsed {
+  transform: translateX(260px);
+}
+.tree-header {
+  padding: 14px 16px 10px;
+  font-family: 'Syne', sans-serif;
+  font-size: .82rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted, #6b7280);
+  border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.tree-count {
+  background: var(--blue, #4488ff);
+  color: #fff;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: .7rem;
+  font-weight: 700;
+}
+.tree-root-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.tree-node { user-select: none; }
+.tree-node-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  margin: 1px 6px;
+  transition: background 0.15s;
+}
+.tree-node-row:hover { background: var(--surface2, rgba(255,255,255,.05)); }
+.tree-node.tree-node-active > .tree-node-row {
+  background: rgba(68,136,255,.12);
+  border-left: 2px solid var(--blue, #4488ff);
+  padding-left: 10px;
+}
+.tree-node-icon { font-size: .95rem; flex-shrink: 0; }
+.tree-node-label {
+  font-size: .78rem;
+  color: var(--text, #e8eaf0);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-node-actions {
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.tree-node-row:hover .tree-node-actions { opacity: 1; }
+.tree-action-btn {
+  background: none;
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  color: var(--muted, #6b7280);
+  border-radius: 4px;
+  width: 20px; height: 20px;
+  font-size: .65rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.tree-action-btn:hover { background: var(--surface2); color: var(--text); }
+.tree-del-btn:hover    { border-color: var(--red, #ff3b3b); color: var(--red, #ff3b3b); }
+.tree-children { list-style: none; margin: 0; padding: 0; }
+.tree-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100%; padding: 24px 16px;
+  text-align: center;
+  color: var(--muted, #6b7280);
+  font-size: .82rem;
+  line-height: 1.6;
+  flex: 1;
+}
+
+/* ── Map side controls ──────────────────────────────────────── */
+#map-side-controls {
+  position: fixed;
+  right: 260px;
+  bottom: 24px;
+  z-index: 121;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: right 0.28s cubic-bezier(.4,0,.2,1);
+}
+#map-side-controls.collapsed { right: 0px; }
+#map-side-controls #map-tree-toggle {
+  position: static;
+  top: auto;
+  right: auto;
+  transform: none;
+  z-index: auto;
+  transition: color .12s;
+}
+#map-tree-toggle {
+  width: 36px; height: 36px;
+  background: var(--surface, #0d0d12);
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 8px 0 0 8px;
+  color: var(--muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+#map-tree-toggle:hover { color: var(--text); background: var(--surface2, rgba(255,255,255,.05)); }
+.zoom-btn {
+  width: 36px; height: 36px;
+  background: var(--surface, #0d0d12);
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 8px 0 0 8px;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.zoom-btn:hover { color: var(--text); background: var(--surface2, rgba(255,255,255,.05)); }
+
+
+
+/* ── Node delete button ─────────────────────────────────────── */
+.node-delete-btn {
+  position: absolute;
+  top: -8px; right: -8px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--red, #ff3b3b);
+  color: #fff;
+  border: none;
+  font-size: .6rem;
+  cursor: pointer;
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 10;
+  line-height: 1;
+}
+.node:hover .node-delete-btn { display: flex; }
+
+/* ── Node body: shape JS inline styles take priority ── */
+/* Only keep transition; shapes rely on JS inline style= */
+body.mindmap-page .node-body {
+  transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .3s, border-color .3s !important;
+}
+/* box-shadow on discovered nodes is set by JS inline style — no override here */
+
+/* ── Icon & Color grids ─────────────────────────────────────── */
+.icon-grid {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+}
+.icon-btn {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background: var(--surface2, rgba(255,255,255,.05));
+  cursor: pointer;
+  font-size: 1.1rem;
+  transition: all 0.15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.icon-btn:hover { background: rgba(68,136,255,.1); }
+.icon-btn.selected { border-color: var(--blue, #4488ff); background: rgba(68,136,255,.15); }
+
+.color-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.color-swatch {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s;
+  outline: none;
+}
+.color-swatch:hover { transform: scale(1.15); }
+.color-swatch.selected { border-color: #fff; transform: scale(1.1); }
+
+/* ── AI suggestion card ─────────────────────────────────────── */
+.ai-suggestion-card {
+  background: var(--surface2, rgba(255,255,255,.04));
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 10px;
+  padding: 12px 14px;
+  transition: border-color 0.15s;
+}
+.ai-suggestion-card:hover { border-color: rgba(155,110,255,.35); }
+
+/* ════════════════════════════════════════════════════════════
+   MINDMAP ANIMATIONS  — performance-first (CSS transforms only)
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Node entrance ── */
+@keyframes mm-node-in {
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.55); }
+  70%  { opacity: 1; transform: translate(-50%,-50%) scale(1.08); }
+  100% { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+}
+@keyframes mm-node-in-child {
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.4) rotate(-6deg); }
+  65%  { opacity: 1; transform: translate(-50%,-50%) scale(1.05) rotate(1deg); }
+  100% { opacity: 1; transform: translate(-50%,-50%) scale(1) rotate(0deg); }
+}
+body.mindmap-page .node.mm-entering {
+  animation: mm-node-in 0.38s cubic-bezier(.34,1.56,.64,1) both;
+}
+body.mindmap-page .node.mm-entering-child {
+  animation: mm-node-in-child 0.42s cubic-bezier(.34,1.56,.64,1) both;
+}
+
+/* ── Edge draw animation ── */
+@keyframes mm-edge-draw {
+  from { stroke-dashoffset: var(--edge-len, 2000); opacity: 0; }
+  10%  { opacity: 1; }
+  to   { stroke-dashoffset: 0; opacity: 1; }
+}
+body.mindmap-page .edge.mm-drawing {
+  stroke-dasharray: var(--edge-len, 2000);
+  stroke-dashoffset: var(--edge-len, 2000);
+  animation: mm-edge-draw 0.55s cubic-bezier(.4,0,.2,1) forwards;
+}
+
+/* ── Node hover pulse ring ── */
+@keyframes mm-pulse-ring {
+  0%   { box-shadow: 0 0 0 0 currentColor; opacity: .6; }
+  100% { box-shadow: 0 0 0 10px currentColor; opacity: 0; }
+}
+body.mindmap-page .node:hover .node-body::after {
+  content: '';
+  position: absolute; inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 3px var(--node-accent, rgba(68,136,255,.35));
+  animation: mm-pulse-ring 0.6s ease-out;
+  pointer-events: none;
+}
+
+/* ── Active node glow pulse ── */
+@keyframes mm-active-glow {
+  0%, 100% { box-shadow: 0 0 18px rgba(68,136,255,.3), 0 0 6px rgba(68,136,255,.2); }
+  50%       { box-shadow: 0 0 32px rgba(68,136,255,.55), 0 0 12px rgba(68,136,255,.35); }
+}
+body.mindmap-page .node.active .node-body {
+  animation: mm-active-glow 2.4s ease-in-out infinite;
+}
+
+/* ── Panel slide-in ── */
+@keyframes mm-panel-in {
+  from { transform: translateX(-16px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+body.mindmap-page #panel.open #panel-body {
+  animation: mm-panel-in 0.28s cubic-bezier(.4,0,.2,1) both;
+}
+
+/* ── Toast bounce-in ── */
+@keyframes mm-toast-in {
+  0%   { transform: translateX(-50%) translateY(12px) scale(.92); opacity: 0; }
+  60%  { transform: translateX(-50%) translateY(-3px) scale(1.02); opacity: 1; }
+  100% { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+}
+body.mindmap-page #toast.show {
+  animation: mm-toast-in 0.3s cubic-bezier(.34,1.56,.64,1) both;
+}
+
+/* ── Nearby tag entrance ── */
+@keyframes mm-tag-in {
+  from { opacity: 0; transform: translateY(4px) scale(.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+body.mindmap-page .nearby-tag {
+  animation: mm-tag-in 0.22s cubic-bezier(.4,0,.2,1) both;
+}
+body.mindmap-page .nearby-tag:nth-child(1) { animation-delay: .04s; }
+body.mindmap-page .nearby-tag:nth-child(2) { animation-delay: .08s; }
+body.mindmap-page .nearby-tag:nth-child(3) { animation-delay: .12s; }
+body.mindmap-page .nearby-tag:nth-child(4) { animation-delay: .16s; }
+body.mindmap-page .nearby-tag:nth-child(5) { animation-delay: .20s; }
+
+/* ── FAB pulse when no nodes ── */
+@keyframes mm-fab-pulse {
+  0%, 100% { box-shadow: 0 4px 24px rgba(68,136,255,.35); }
+  50%       { box-shadow: 0 4px 40px rgba(68,136,255,.65), 0 0 0 6px rgba(68,136,255,.12); }
+}
+/* ── Canvas ready fade-in ── */
+@keyframes mm-canvas-ready {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+body.mindmap-page #canvas.mm-ready {
+  animation: mm-canvas-ready 0.4s ease both;
+}
+
+/* ── Respect reduced-motion ── */
+@media (prefers-reduced-motion: reduce) {
+  body.mindmap-page .node.mm-entering,
+  body.mindmap-page .node.mm-entering-child,
+  body.mindmap-page .edge.mm-drawing,
+  body.mindmap-page .node.active .node-body,
+  body.mindmap-page #panel.open #panel-body,
+  body.mindmap-page #toast.show,
+  body.mindmap-page .nearby-tag,
+  body.mindmap-page #canvas.mm-ready {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+
+/* ── Connect mode target nodes ─────────────────────────────── */
+body.mindmap-page .node.mm-connect-target { cursor: crosshair !important; }
+body.mindmap-page .node.mm-connect-target .node-body {
+  box-shadow: 0 0 0 3px rgba(68,136,255,.6), 0 0 24px rgba(68,136,255,.3) !important;
+  cursor: crosshair !important;
+}
+body.mindmap-page .node.mm-connect-target .node-body:hover {
+  box-shadow: 0 0 0 4px #4488ff, 0 0 32px rgba(68,136,255,.55) !important;
+  transform: scale(1.08);
+}
+
+/* ── Panel children section ─────────────────────────────────── */
+.panel-children-section { margin-top: 1rem; }
+
+/* ── Node image ─────────────────────────────────────────────── */
+.node-img-wrap { width:100%;overflow:hidden;border-radius:6px;margin-bottom:4px;max-height:70px; }
+.node-img { width:100%;height:70px;object-fit:cover; }
+
+/* ── Node body: uniform sizing for parent & child ───────────── */
+.node-body { text-align:center; border-style:solid; transition:all .2s; }
+
+/* ── Guest banner in tree panel ─────────────────────────────── */
+.guest-tree-banner { padding:8px 14px;background:rgba(68,136,255,.06);border-top:1px solid var(--border);font-size:.71rem;color:var(--muted);text-align:center;line-height:1.5; }
+
+/* ── Help modal ─────────────────────────────────────────────── */
+#help-modal-overlay {
+  position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);
+  z-index:2000;display:none;align-items:center;justify-content:center;padding:1rem;
+}
+#help-modal-overlay.open { display:flex; }
+#help-modal-box {
+  background:var(--surface,#0d0d12);border:1px solid var(--border,rgba(255,255,255,.08));
+  border-radius:16px;max-width:480px;width:100%;padding:28px 28px 24px;position:relative;
+  max-height:90vh;overflow-y:auto;
+}
+#help-modal-box h2 {
+  font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:700;margin:0 0 4px;color:var(--text);
+}
+#help-modal-box .help-sub { font-size:.78rem;color:var(--muted);margin:0 0 18px; }
+#help-modal-box ul { list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px; }
+#help-modal-box ul li {
+  display:flex;gap:10px;align-items:flex-start;
+  font-size:.82rem;color:var(--text,#e8eaf0);line-height:1.5;
+}
+#help-modal-box ul li .help-icon {
+  width:28px;height:28px;border-radius:8px;background:rgba(68,136,255,.1);
+  border:1px solid rgba(68,136,255,.25);display:flex;align-items:center;justify-content:center;
+  font-size:.9rem;flex-shrink:0;margin-top:1px;
+}
+#help-modal-close {
+  position:absolute;top:14px;right:14px;background:none;border:none;
+  color:var(--muted);font-size:1rem;cursor:pointer;padding:4px 8px;border-radius:6px;
+  transition:color .15s;
+}
+#help-modal-close:hover { color:var(--text); }
+
+/* ── Color picker labels ─────────────────────────────────────── */
+.color-picker-label {
+  font-size:.68rem;color:var(--muted);margin-top:2px;display:block;
+}
+
+/* ── Tree search bar ─────────────────────────────────────────── */
+.tree-search-wrap {
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
+  flex-shrink: 0;
+}
+#tree-search {
+  width: 100%;
+  background: var(--surface2, rgba(255,255,255,.05));
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 8px;
+  color: var(--text, #e8eaf0);
+  font-size: .75rem;
+  padding: 6px 10px;
+  font-family: 'DM Sans', sans-serif;
+  outline: none;
+  transition: border-color .15s;
+  box-sizing: border-box;
+}
+#tree-search::placeholder { color: var(--muted, #6b7280); }
+#tree-search:focus { border-color: rgba(68,136,255,.4); }
+
+/* ── Edge flow (directional traveling-dot animation) ─────────── */
+@keyframes mm-flow-fwd {
+  from { stroke-dashoffset: 30; }
+  to   { stroke-dashoffset: 0;  }
+}
+@keyframes mm-flow-bwd {
+  from { stroke-dashoffset: 0;  }
+  to   { stroke-dashoffset: 30; }
+}
+body.mindmap-page .edge-flow {
+  stroke-width: 2;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: none;
+  stroke-dasharray: 5 25;
+  animation: mm-flow-fwd 1.8s linear infinite;
+  opacity: 0.45;
+}
+body.mindmap-page .edge-flow.flow-bwd  { animation-name: mm-flow-bwd; }
+body.mindmap-page .edge-flow.flow-both { stroke-dasharray: 4 10; }
+body.mindmap-page .edge-flow.flow-none { display: none; }
+body.mindmap-page .edge-group.active-edge .edge-flow { opacity: 0.85; stroke-width: 2.5; }
+@media (prefers-reduced-motion: reduce) {
+  body.mindmap-page .edge-flow { animation: none !important; opacity: 0 !important; }
+}
+
+/* ── Decorative dot-grid behind canvas ───────────────────────── */
+body.mindmap-page #canvas::before {
+  content: '';
+  position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    radial-gradient(circle, rgba(68,136,255,.045) 1px, transparent 1px),
+    radial-gradient(circle, rgba(155,110,255,.03) 1px, transparent 1px);
+  background-size: 60px 60px, 95px 95px;
+  background-position: 0 0, 30px 30px;
+}
+</style>
+<style id="topnav-css">
+/* ── TOPNAV BASE ──────────────────────────────────────────────── */
+.topnav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 900;
+  height: 56px;
+  background: rgba(13,13,18,.92);
+  border-bottom: 1px solid var(--border, rgba(255,255,255,.07));
+  display: flex;
+  align-items: center;
+  padding: 0 1.2rem;
+  gap: 0;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.topnav-logo {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 1.08rem;
+  color: var(--text, #e8e8ef);
+  text-decoration: none;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+  margin-right: 1.6rem;
+  flex-shrink: 0;
+}
+.topnav-logo span { color: var(--accent, #4f8ef7); }
+.topnav-links {
+  display: flex;
+  align-items: center;
+  gap: .1rem;
+  flex: 1;
+  min-width: 0;
+  overflow: visible;
+}
+.topnav .nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: .38rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .82rem;
+  font-weight: 500;
+  color: var(--muted, #8b8b9a);
+  text-decoration: none;
+  padding: .36rem .7rem;
+  border-radius: 8px;
+  transition: background .15s, color .15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.topnav .nav-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+.topnav .nav-item:hover  { background: rgba(255,255,255,.05); color: var(--text, #e8e8ef); }
+.topnav .nav-item.active { background: rgba(79,142,247,.12); color: var(--accent, #4f8ef7); }
+
+/* age group pushed to right */
+.topnav-age-group {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin-left: auto;
+  padding-left: .9rem;
+  flex-shrink: 0;
+}
+.topnav-age-label {
+  font-family: 'DM Mono', monospace;
+  font-size: .62rem;
+  color: var(--muted);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.topnav .age-pill {
+  font-family: 'DM Sans', sans-serif;
+  font-size: .7rem;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 6px;
+  padding: .18rem .48rem;
+  cursor: pointer;
+  transition: all .15s;
+  flex-shrink: 0;
+}
+.topnav .age-pill:hover,
+.topnav .age-pill.active { background: rgba(79,142,247,.12); color: var(--accent); border-color: rgba(79,142,247,.35); }
+.topnav-login { margin-left: .4rem; flex-shrink: 0; }
+
+/* Dashboard dropdown in topnav */
+.topnav .nav-group { position: relative; flex-shrink: 0; }
+.topnav .nav-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .38rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: 'DM Sans', sans-serif;
+  font-size: .82rem;
+  font-weight: 500;
+  padding: .36rem .7rem;
+  border-radius: 8px;
+  white-space: nowrap;
+  transition: background .15s, color .15s;
+}
+.topnav .nav-group-toggle:hover { background: rgba(255,255,255,.05); color: var(--text); }
+.topnav .nav-group-toggle.active-group { color: var(--accent); }
+.topnav .nav-group-toggle .nav-icon,
+.topnav .nav-group-toggle svg { width: 14px; height: 14px; }
+.topnav .nav-sub {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: var(--card, #17171e);
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 10px;
+  padding: .3rem;
+  min-width: 170px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.45);
+  z-index: 950;
+}
+.topnav .nav-sub.open { display: flex; flex-direction: column; gap: .05rem; }
+.topnav .nav-sub-item {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .8rem;
+  color: var(--muted);
+  text-decoration: none;
+  padding: .38rem .6rem;
+  border-radius: 7px;
+  transition: background .15s, color .15s;
+}
+.topnav .nav-sub-item:hover { background: rgba(255,255,255,.05); color: var(--text); }
+
+/* Burger — desktop hidden */
+.topnav-burger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: .3rem;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.topnav-burger svg { width: 22px; height: 22px; display: block; }
+.topnav-burger:hover { color: var(--text); }
+
+/* ── MOBILE DRAWER ───────────────────────────────────────────── */
+.topnav-drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 260px;
+  background: var(--surface, #0f0f13);
+  border-left: 1px solid var(--border, rgba(255,255,255,.08));
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform .25s ease;
+}
+.topnav-drawer.open { transform: translateX(0); }
+.topnav-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 1050;
+  cursor: pointer;
+}
+.topnav-overlay.open { display: block; }
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.1rem;
+  border-bottom: 1px solid var(--border);
+  height: 56px;
+  flex-shrink: 0;
+}
+.drawer-close-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: .3rem;
+  border-radius: 6px;
+  display: flex;
+}
+.drawer-close-btn svg { width: 18px; height: 18px; display: block; }
+.drawer-close-btn:hover { color: var(--text); }
+.drawer-nav {
+  display: flex;
+  flex-direction: column;
+  padding: .5rem .5rem;
+  gap: .05rem;
+  flex: 1;
+  overflow-y: auto;
+}
+.drawer-nav .nav-item {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .88rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-decoration: none;
+  padding: .55rem .75rem;
+  border-radius: 9px;
+  transition: background .15s, color .15s;
+}
+.drawer-nav .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+.drawer-nav .nav-item:hover  { background: rgba(255,255,255,.05); color: var(--text); }
+.drawer-nav .nav-item.active { background: rgba(79,142,247,.12); color: var(--accent); }
+.drawer-age {
+  padding: .6rem .85rem .9rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ── LAYOUT FIXES ────────────────────────────────────────────── */
+/* Push all page content below topnav */
+body { padding-top: 56px !important; }
+/* Kill old sidebar + burger — their HTML is removed but styles.css may have them */
+.sidebar         { display: none !important; }
+.sidebar-overlay { display: none !important; }
+.burger-btn      { display: none !important; }
+/* Remove old sidebar left-margin from .main */
+.main { margin-left: 0 !important; }
+
+/* ── MINDMAP SPECIFIC ────────────────────────────────────────── */
+/* The mindmap #nav hint bar sits below topnav */
+body.mindmap-page #nav {
+  top: 56px !important;
+}
+/* The full-screen canvas starts below topnav */
+body.mindmap-page #canvas {
+  top: 56px !important;
+  height: calc(100vh - 56px) !important;
+}
+/* Tree panel (right sidebar) starts below topnav */
+body.mindmap-page #tree-panel {
+  top: 56px !important;
+  height: calc(100vh - 56px) !important;
+}
+/* Left detail panel */
+body.mindmap-page #panel {
+  top: 56px !important;
+}
+/* Spotlight overlay — stays over everything */
+body.mindmap-page #spotlight-overlay { z-index: 1200 !important; }
+
+/* ── MOBILE ──────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .topnav-links  { display: none; }
+  .topnav-burger { display: flex; }
+}
+</style>
+</head>
+<body class="mindmap-page">
+<script id="topnav-js">
+(function(){
+  function _toggle(){
+    var drawer  = document.getElementById('topnav-drawer');
+    var overlay = document.getElementById('sidebar-overlay');
+    if(!drawer) return;
+    var open = drawer.classList.toggle('open');
+    if(overlay) overlay.classList.toggle('open', open);
+    document.body.style.overflow = open ? 'hidden' : '';
+  }
+  // override whatever script.js defines later
+  window.toggleSidebar = _toggle;
+  // re-apply after DOMContentLoaded in case script.js overwrites it
+  document.addEventListener('DOMContentLoaded', function(){ window.toggleSidebar = _toggle; });
+})();
+</script>
+
+<div class="grid-bg"></div>
+<!-- ── TOPNAV ── -->
+<nav class="topnav" id="topnav">
+  <a href="index.html" class="topnav-logo">Social<span>Proof</span></a>
+  <div class="topnav-links">
+    <a href="index.html" class="nav-item user-only-nav">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>Practice
+    </a>
+    <a href="lessons.html" class="nav-item user-only-nav">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>Lessons
+    </a>
+    <a href="mindmap.html" class="nav-item user-only-nav active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>My Map
+    </a>
+    <a href="dashboard.html" class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <div class="topnav-age-group">
+      <span class="topnav-age-label">Age</span>
+      <button class="age-pill" id="age-youth"  onclick="setAgeMode('youth')">Youth</button>
+      <button class="age-pill" id="age-adult" onclick="setAgeMode('adult')">Adult</button>
+      <button class="age-pill" id="age-older" onclick="setAgeMode('older')">Senior</button>
+    </div>
+    <a href="login.html" class="nav-item topnav-login" id="sidebar-login-link">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>Login
+    </a>
+  </div>
+  <button class="topnav-burger" onclick="toggleSidebar()" title="Menu" aria-label="Menu">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+    </svg>
+  </button>
+</nav>
+<!-- Mobile drawer -->
+<div class="topnav-drawer" id="topnav-drawer">
+  <div class="drawer-header">
+    <a href="index.html" class="topnav-logo">Social<span>Proof</span></a>
+    <button class="drawer-close-btn" onclick="toggleSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <nav class="drawer-nav">
+    <a href="index.html" class="nav-item user-only-nav">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>Practice
+    </a>
+    <a href="lessons.html" class="nav-item user-only-nav">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>Lessons
+    </a>
+    <a href="mindmap.html" class="nav-item user-only-nav active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>My Map
+    </a>
+    <a href="dashboard.html" class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a href="login.html" class="nav-item" id="sidebar-login-link-m">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>Login
+    </a>
+  </nav>
+  <div class="drawer-age">
+    <div class="sidebar-section">Age Mode</div>
+    <div class="age-mode-grid">
+      <button class="age-pill" id="age-youth-m"  onclick="setAgeMode('youth')">Youth</button>
+      <button class="age-pill" id="age-adult-m" onclick="setAgeMode('adult')">Adult</button>
+      <button class="age-pill" id="age-older-m" onclick="setAgeMode('older')">Senior</button>
+    </div>
+  </div>
+</div>
+<div class="topnav-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+<div id="nav">
+  <div style="display:flex;gap:6px;margin-left:auto;align-items:center;">
+    <div id="nav-hint">drag nodes &nbsp;&middot;&nbsp; scroll to zoom &nbsp;&middot;&nbsp; <kbd>esc</kbd> to close &nbsp;&middot;&nbsp; <kbd>H</kbd> to recenter</div>
+  </div>
+</div>
+
+<div id="canvas">
+  <div id="map-root">
+    <svg id="connections" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+</div>
+
+<!-- Detail panel (left) -->
+<div id="panel">
+  <div id="panel-head">
+    <div id="panel-icon">📌</div>
+    <div id="panel-title">Node</div>
+    <button id="panel-close">✕</button>
+  </div>
+  <div id="panel-body"></div>
+</div>
+
+<!-- Tree panel (right) -->
+<div id="tree-panel"></div>
+
+<div id="toast"></div>
+
+<!-- Zoom + tree toggle controls group -->
+<div id="map-side-controls">
+  <button class="zoom-btn" id="undo-btn" onclick="mmUndo()" title="Undo (Ctrl+Z)" disabled>↩</button>
+  <button class="zoom-btn" id="redo-btn" onclick="mmRedo()" title="Redo (Ctrl+Y)" disabled>↪</button>
+  <button class="zoom-btn" id="zoom-in-btn" title="Zoom In">+</button>
+  <button class="zoom-btn" id="zoom-out-btn" title="Zoom Out">−</button>
+  <button class="zoom-btn" id="map-tree-toggle" onclick="toggleTreePanel()" title="Toggle node list">&gt;</button>
+  <button class="zoom-btn" id="help-side-btn" title="How to use My Map" onclick="openHelpModal()">?</button>
+</div>
+
+<script>
+// Tree panel toggle
+let _treePanelOpen = window.innerWidth >= 1100;
+function toggleTreePanel() {
+  _treePanelOpen = !_treePanelOpen;
+  const panel    = document.getElementById('tree-panel');
+  const controls = document.getElementById('map-side-controls');
+  const canvas   = document.getElementById('canvas');
+  const btn      = document.getElementById('map-tree-toggle');
+  panel.classList.toggle('collapsed', !_treePanelOpen);
+  controls.classList.toggle('collapsed', !_treePanelOpen);
+  if (btn) btn.innerHTML = _treePanelOpen ? '>' : '<';
+  if (_treePanelOpen) {
+    canvas.classList.add('tree-open');
+  } else {
+    canvas.classList.remove('tree-open');
+  }
+}
+(function() {
+  const btn = document.getElementById('map-tree-toggle');
+  if (!_treePanelOpen) {
+    document.getElementById('tree-panel').classList.add('collapsed');
+    document.getElementById('map-side-controls').classList.add('collapsed');
+    if (btn) btn.innerHTML = '<';
+  } else {
+    document.getElementById('canvas').classList.add('tree-open');
+    if (btn) btn.innerHTML = '>';
+  }
+})();
+</script>
+
+<!-- Help modal -->
+<div id="help-modal-overlay">
+  <div id="help-modal-box">
+    <button id="help-modal-close" onclick="closeHelpModal()">✕</button>
+    <h2>🗺️ My Map — How it works</h2>
+    <p class="help-sub">Build your own knowledge map about media literacy topics.</p>
+    <ul>
+      <li><span class="help-icon">➕</span><span><strong>Add a parent node</strong> — Use the <em>Add Node</em> panel on the right, or click <em>+ Add parent node</em> inside the panel to create a top-level topic.</span></li>
+      <li><span class="help-icon">🔗</span><span><strong>Add sub-nodes</strong> — Click any node on the canvas to open its detail panel, then click <em>+ Add sub-node here</em> to branch out from it.</span></li>
+      <li><span class="help-icon">✋</span><span><strong>Drag nodes</strong> — Click and drag any node to reposition it. Positions are saved automatically and persist after refresh.</span></li>
+      <li><span class="help-icon">🔍</span><span><strong>Pan &amp; zoom</strong> — Click and drag the <em>background</em> to pan the canvas. Scroll (or pinch) to zoom in and out.</span></li>
+      <li><span class="help-icon">✏️</span><span><strong>Edit or delete</strong> — Hover over any node to see the delete button, or open the node and click <em>Edit this node</em> to change its label, shape, icon, or colors.</span></li>
+      <li><span class="help-icon">🎨</span><span><strong>Box &amp; text color</strong> — When editing a node, <em>Box Color</em> controls the border/glow accent and <em>Text Color</em> controls the label text — they are fully independent.</span></li>
+      <li><span class="help-icon">📄</span><span><strong>Article / Notes</strong> — Use the <em>Article / Notes</em> field to attach long-form text, pasted articles, or detailed notes to any node. Tap the header in the panel to expand or collapse it.</span></li>
+      <li><span class="help-icon">✦</span><span><strong>AI suggestions</strong> — Open any node and click <em>✦ AI suggest a node</em> to get AI-powered ideas for what to explore next.</span></li>
+    </ul>
+  </div>
+</div>
+
+<script src="/pages/script.js" defer></script>
+<script src="/pages/mindmap.js" defer></script>
+</body>
+</html>
