@@ -7,19 +7,13 @@ services:
     branch: main
     buildCommand: >
       pip install --upgrade pip &&
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pip install -r requirements.txt &&
-      python -m spacy download en_core_web_sm &&
-      PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.playwright playwright install --no-deps chromium
+      pip install -r requirements.txt &&
+      python -m spacy download en_core_web_sm
     startCommand: >
-      PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.playwright
       uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/project/.playwright
-      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
-        value: "1"
       - key: DATABASE_URL
         sync: false
       - key: SECRET_KEY

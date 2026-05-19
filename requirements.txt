@@ -74,10 +74,11 @@ python-docx==1.1.2
 python-pptx==1.0.2
 
 # Live search
+# playwright and playwright-stealth are intentionally excluded from requirements.txt
+# Render's build system auto-triggers the browser installer (which needs root).
+# The code gracefully falls back to requests/cloudscraper when playwright is absent.
+# To enable locally: pip install playwright==1.59.0 playwright-stealth==2.0.3 && playwright install chromium
 cloudscraper==1.2.71
-playwright==1.59.0
-playwright-stealth==2.0.3
-# After install run: playwright install chromium
 
 # Redis — persistent rate limiter + JWT token blocklist (routers/auth.py)
 # Required for multi-worker deployments. Falls back to in-process memory if not set.
