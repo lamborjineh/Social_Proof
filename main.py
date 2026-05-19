@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import logger, CORS_ORIGINS
 from core.model_registry import ModelRegistry
-from database.models import init_mysql_schema
+from database.models import init_db_schema
 from routers.dashboard   import router as dashboard_router
 from routers.mindmap      import router as mindmap_router
 from routers.user_mindmap import router as user_mindmap_router
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
     logger.info("SocialProof API v3.3 starting — running migrations and pre-loading models…")
 
     try:
-        init_mysql_schema()
+        init_db_schema()
         logger.info("DB migrations complete.")
     except Exception as e:
         logger.error(f"DB migration error: {e}")

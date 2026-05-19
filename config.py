@@ -15,7 +15,7 @@ except ImportError:
 # ── Database ──────────────────────────────────────────────────────────────────
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "mysql+pymysql://user:password@localhost/socialproof_db",
+    "postgresql+psycopg2://user:password@localhost/socialproof_db",
 )
 
 # ── Auth / JWT ────────────────────────────────────────────────────────────────

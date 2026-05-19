@@ -36,7 +36,7 @@ from sqlalchemy.orm import declarative_base, relationship
 from config import DATABASE_URL, logger
 
 Base   = declarative_base()
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=3600)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 
 # ── Core tables ───────────────────────────────────────────────────────────────
@@ -315,22 +315,20 @@ class EvalQuestionORM(Base):
     assigned. Managed entirely via admin.py endpoints.
 
     skip_lesson_id: if set, users who answer correctly skip that lesson.
-    mindmap_node_id: if set, completing this eval step unlocks the linked mindmap node.
     """
     __tablename__ = "eval_questions"
-    id              = Column(Integer, primary_key=True, autoincrement=True)
-    step_number     = Column(Integer, nullable=False, default=1)
-    title           = Column(String(255), nullable=False)
-    step_label      = Column(String(80), nullable=True)    # short label shown in progress bar
-    prompt          = Column(Text, nullable=False)
-    hint            = Column(Text, nullable=True)
-    input_type      = Column(String(32), nullable=False, default="text")
-    options         = Column(Text, nullable=True)          # JSON string of choices
-    is_active       = Column(SmallInteger, nullable=False, default=1)
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    step_number    = Column(Integer, nullable=False, default=1)
+    title          = Column(String(255), nullable=False)
+    step_label     = Column(String(80), nullable=True)    # short label shown in progress bar
+    prompt         = Column(Text, nullable=False)
+    hint           = Column(Text, nullable=True)
+    input_type     = Column(String(32), nullable=False, default="text")
+    options        = Column(Text, nullable=True)          # JSON string of choices
+    is_active      = Column(SmallInteger, nullable=False, default=1)
     skip_lesson_id  = Column(Integer, nullable=True)       # FK → lessons.id
     step_link_type  = Column(String(32), nullable=True)    # url|lesson|quiz|mindmap|dashboard
     step_link_value = Column(String(512), nullable=True)   # key/id/url depending on type
-    mindmap_node_id = Column(String(64), nullable=True)    # FK → mindmap_nodes.id; unlocks node on completion
     created_at      = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at      = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                              onupdate=lambda: datetime.now(timezone.utc))
@@ -356,7 +354,6 @@ class LessonORM(Base):
     sort_order             = Column(Integer,       nullable=True)
     prerequisite_lesson_id = Column(Integer,       nullable=True)
     is_published           = Column(SmallInteger, nullable=False, default=1)
-    mindmap_node_id        = Column(String(64),   nullable=True)  # FK → mindmap_nodes.id; unlocks node on completion
     created_at             = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at             = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -405,7 +402,6 @@ class QuizQuestionORM(Base):
     image_url     = Column(String(512), nullable=True)
     video_url     = Column(String(1024), nullable=True)
     media_type    = Column(SAEnum("text", "image", "video", "file"), nullable=True, default="text")
-    mindmap_node_id = Column(String(64), nullable=True)  # FK → mindmap_nodes.id; unlocks node on correct answer
 
 
 class QuizAttemptORM(Base):
@@ -661,217 +657,176 @@ class UserCreatedContentORM(Base):
     created_at     = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
-def init_mysql_schema():
+def init_db_schema():
     """
     Run safe migrations on startup. Every statement is idempotent.
     v5.0: adds user_reflections, confidence_snapshots, source_diversity_log,
     user_skill_history tables and their column-level safe migrations.
     """
 
+
     new_tables_sql = [
-        # ── original tables (unchanged) ───────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS submissions (
-            id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            user_id       INT UNSIGNED NULL,
+            id            SERIAL PRIMARY KEY,
+            user_id       INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
             session_token VARCHAR(64)  NOT NULL,
-            input_type    ENUM('text','url','image','pdf','file') NOT NULL DEFAULT 'text',
+            input_type    VARCHAR(10)  NOT NULL DEFAULT 'text'
+                          CHECK (input_type IN ('text','url','image','pdf','file')),
             raw_content   TEXT         NOT NULL,
             parsed_text   TEXT         NULL,
-            status        ENUM('pending','analyzed','complete') NOT NULL DEFAULT 'pending',
-            created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (`id`),
-            KEY `idx_submissions_user`   (`user_id`),
-            KEY `idx_submissions_status` (`status`),
-            CONSTRAINT `submissions_ibfk_1`
-                FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+            status        VARCHAR(10)  NOT NULL DEFAULT 'pending'
+                          CHECK (status IN ('pending','analyzed','complete')),
+            created_at    TIMESTAMP    NOT NULL DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS lessons (
-            id                     INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            lesson_key             VARCHAR(100) NOT NULL,
+            id                     SERIAL PRIMARY KEY,
+            lesson_key             VARCHAR(100) NOT NULL UNIQUE,
             title                  VARCHAR(255) NOT NULL,
             content                TEXT         NOT NULL,
-            topic                  ENUM('claim_detection','source_verification',
-                                        'bias_detection','evidence_evaluation','general')
-                                       NOT NULL,
-            difficulty             ENUM('beginner','intermediate','advanced')
-                                       NOT NULL DEFAULT 'beginner',
+            topic                  VARCHAR(60)  NOT NULL,
+            difficulty             VARCHAR(20)  NOT NULL DEFAULT 'beginner'
+                                   CHECK (difficulty IN ('beginner','intermediate','advanced')),
+            image_url              VARCHAR(512) NULL,
             mil_skill              VARCHAR(50)  NULL,
-            sort_order             INT          NULL,
-            prerequisite_lesson_id INT          NULL,
-            is_published           TINYINT(1)   NOT NULL DEFAULT 1,
-            created_at             DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at             DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                       ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `lesson_key` (`lesson_key`)
+            sort_order             INTEGER      NULL,
+            prerequisite_lesson_id INTEGER      NULL,
+            is_published           SMALLINT     NOT NULL DEFAULT 1,
+            created_at             TIMESTAMP    NOT NULL DEFAULT NOW(),
+            updated_at             TIMESTAMP    NOT NULL DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS lessons_triggered (
-            id             INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            submission_id  INT UNSIGNED NOT NULL,
-            lesson_id      INT UNSIGNED NOT NULL,
+            id             SERIAL PRIMARY KEY,
+            submission_id  INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+            lesson_id      INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
             trigger_reason VARCHAR(255) NULL,
-            was_read       TINYINT(1)   NOT NULL DEFAULT 0,
-            triggered_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (`id`),
-            KEY `submission_id` (`submission_id`),
-            KEY `lesson_id`     (`lesson_id`),
-            CONSTRAINT `lessons_triggered_ibfk_1`
-                FOREIGN KEY (`submission_id`) REFERENCES `submissions` (`id`) ON DELETE CASCADE,
-            CONSTRAINT `lessons_triggered_ibfk_2`
-                FOREIGN KEY (`lesson_id`) REFERENCES `lessons` (`id`) ON DELETE CASCADE
+            was_read       SMALLINT     NOT NULL DEFAULT 0,
+            triggered_at   TIMESTAMP    NOT NULL DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS user_skill_progress (
-            id                INT AUTO_INCREMENT PRIMARY KEY,
-            user_id           INT NULL,
+            id                SERIAL PRIMARY KEY,
+            user_id           INTEGER NULL,
             session_token     VARCHAR(64) NULL,
-            topic             ENUM('claim_detection','source_verification','bias_detection',
-                                   'evidence_evaluation','general') NOT NULL,
-            current_level     ENUM('beginner','intermediate','advanced')
-                                  NOT NULL DEFAULT 'beginner',
+            topic             VARCHAR(60) NOT NULL,
+            current_level     VARCHAR(20) NOT NULL DEFAULT 'beginner'
+                              CHECK (current_level IN ('beginner','intermediate','advanced')),
             quiz_accuracy_pct FLOAT NULL,
-            lessons_completed INT NOT NULL DEFAULT 0,
-            last_updated      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            INDEX idx_usp_user  (user_id),
-            INDEX idx_usp_topic (topic)
+            lessons_completed INTEGER NOT NULL DEFAULT 0,
+            last_updated      TIMESTAMP DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS pretest_results (
-            id            INT AUTO_INCREMENT PRIMARY KEY,
-            user_id       INT NULL,
+            id            SERIAL PRIMARY KEY,
+            user_id       INTEGER NULL,
             session_token VARCHAR(64) NULL,
-            phase         ENUM('pretest','posttest') NOT NULL,
-            score_pct     INT NOT NULL,
-            correct       INT NOT NULL,
-            total         INT NOT NULL,
-            submitted_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_pr_user    (user_id),
-            INDEX idx_pr_session (session_token)
+            phase         VARCHAR(10) NOT NULL CHECK (phase IN ('pretest','posttest')),
+            score_pct     INTEGER NOT NULL,
+            correct       INTEGER NOT NULL,
+            total         INTEGER NOT NULL,
+            submitted_at  TIMESTAMP DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS lesson_completions (
-            id            INT AUTO_INCREMENT PRIMARY KEY,
-            user_id       INT NULL,
+            id            SERIAL PRIMARY KEY,
+            user_id       INTEGER NULL,
             session_token VARCHAR(64) NULL,
-            lesson_id     INT NOT NULL,
-            completed_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_lc_user   (user_id),
-            INDEX idx_lc_lesson (lesson_id)
+            lesson_id     INTEGER NOT NULL,
+            completed_at  TIMESTAMP DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS mbfc_domains (
-            id                 INT AUTO_INCREMENT PRIMARY KEY,
+            id                 SERIAL PRIMARY KEY,
             domain             VARCHAR(255) NOT NULL UNIQUE,
             factual_reporting  VARCHAR(50)  NULL,
             bias_rating        VARCHAR(50)  NULL,
             credibility_rating VARCHAR(50)  NULL,
             country            VARCHAR(10)  NULL,
             notes_url          VARCHAR(500) NULL,
-            last_synced        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            INDEX idx_mbfc_domain (domain)
+            last_synced        TIMESTAMP DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS url_tracking (
-            id            INT AUTO_INCREMENT PRIMARY KEY,
+            id            SERIAL PRIMARY KEY,
             url           VARCHAR(2083) NOT NULL,
             url_hash      VARCHAR(64)   NOT NULL,
             domain        VARCHAR(255)  NULL,
-            submitted_by  INT           NULL,
+            submitted_by  INTEGER       NULL,
             session_token VARCHAR(64)   NULL,
-            submission_id INT           NULL,
-            submitted_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY `uq_url_hash_session` (`url_hash`, `session_token`),
-            INDEX idx_ut_hash       (url_hash),
-            INDEX idx_ut_domain     (domain),
-            INDEX idx_ut_user       (submitted_by),
-            INDEX idx_ut_submission (submission_id)
+            submission_id INTEGER       NULL,
+            submitted_at  TIMESTAMP DEFAULT NOW(),
+            UNIQUE (url_hash, session_token)
         )""",
+
         """CREATE TABLE IF NOT EXISTS user_behavior_profile (
-            id                        INT AUTO_INCREMENT PRIMARY KEY,
-            user_id                   INT          NULL,
-            session_token             VARCHAR(64)  NULL,
-            claim_detection_score     FLOAT        DEFAULT 50,
-            source_eval_score         FLOAT        DEFAULT 50,
-            bias_detection_score      FLOAT        DEFAULT 50,
-            evidence_eval_score       FLOAT        DEFAULT 50,
-            avg_time_per_step_seconds FLOAT        NULL,
-            steps_skipped_rate        FLOAT        DEFAULT 0,
-            lesson_read_rate          FLOAT        DEFAULT 0,
-            total_submissions         INT NOT NULL DEFAULT 0,
-            total_lessons_read        INT NOT NULL DEFAULT 0,
-            last_activity_at          DATETIME     NULL,
-            updated_at                DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_ubp_user    (user_id),
-            UNIQUE KEY uq_ubp_session (session_token),
-            INDEX idx_ubp_user        (user_id),
-            INDEX idx_ubp_session     (session_token)
+            id                        SERIAL PRIMARY KEY,
+            user_id                   INTEGER  NULL UNIQUE,
+            session_token             VARCHAR(64) NULL UNIQUE,
+            claim_detection_score     FLOAT DEFAULT 50,
+            source_eval_score         FLOAT DEFAULT 50,
+            bias_detection_score      FLOAT DEFAULT 50,
+            evidence_eval_score       FLOAT DEFAULT 50,
+            avg_time_per_step_seconds FLOAT NULL,
+            steps_skipped_rate        FLOAT DEFAULT 0,
+            lesson_read_rate          FLOAT DEFAULT 0,
+            total_submissions         INTEGER NOT NULL DEFAULT 0,
+            total_lessons_read        INTEGER NOT NULL DEFAULT 0,
+            last_activity_at          TIMESTAMP NULL,
+            updated_at                TIMESTAMP DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS password_reset_tokens (
-            id         INT          NOT NULL AUTO_INCREMENT,
-            user_id    INT UNSIGNED NOT NULL,
-            token_hash VARCHAR(64)  NOT NULL UNIQUE,
-            expires_at DATETIME     NOT NULL,
-            used       TINYINT(1)   NOT NULL DEFAULT 0,
-            created_at DATETIME     DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            INDEX idx_prt_user   (user_id),
-            INDEX idx_prt_hash   (token_hash),
-            INDEX idx_prt_expiry (expires_at)
+            id         SERIAL PRIMARY KEY,
+            user_id    INTEGER     NOT NULL,
+            token_hash VARCHAR(64) NOT NULL UNIQUE,
+            expires_at TIMESTAMP   NOT NULL,
+            used       SMALLINT    NOT NULL DEFAULT 0,
+            created_at TIMESTAMP   DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS email_verification_tokens (
-            id         INT          NOT NULL AUTO_INCREMENT,
-            user_id    INT UNSIGNED NOT NULL,
-            token_hash VARCHAR(64)  NOT NULL UNIQUE,
-            expires_at DATETIME     NOT NULL,
-            used       TINYINT(1)   NOT NULL DEFAULT 0,
-            created_at DATETIME     DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            INDEX idx_evt_user   (user_id),
-            INDEX idx_evt_hash   (token_hash),
-            INDEX idx_evt_expiry (expires_at)
+            id         SERIAL PRIMARY KEY,
+            user_id    INTEGER     NOT NULL,
+            token_hash VARCHAR(64) NOT NULL UNIQUE,
+            expires_at TIMESTAMP   NOT NULL,
+            used       SMALLINT    NOT NULL DEFAULT 0,
+            created_at TIMESTAMP   DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS mindmap_lens_progress (
-            id          INT          NOT NULL AUTO_INCREMENT,
-            user_id     INT UNSIGNED NOT NULL,
+            id          SERIAL PRIMARY KEY,
+            user_id     INTEGER     NOT NULL,
             lens_id     VARCHAR(100) NOT NULL,
-            explored_at DATETIME     DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY  uq_mlp_user_lens (user_id, lens_id),
-            INDEX idx_mlp_user (user_id)
+            explored_at TIMESTAMP   DEFAULT NOW(),
+            UNIQUE (user_id, lens_id)
         )""",
 
         """CREATE TABLE IF NOT EXISTS mindmap_nodes (
             id            VARCHAR(64)  NOT NULL,
             map_id        VARCHAR(32)  NOT NULL DEFAULT 'main',
-            type          ENUM('root','cat','leaf') NOT NULL DEFAULT 'leaf',
+            type          VARCHAR(10)  NOT NULL DEFAULT 'leaf'
+                          CHECK (type IN ('root','cat','leaf')),
             icon          VARCHAR(16)  NOT NULL DEFAULT '📌',
             label         VARCHAR(120) NOT NULL,
             sub           VARCHAR(120) DEFAULT NULL,
             color         VARCHAR(10)  NOT NULL DEFAULT '#4488ff',
-            x             INT          NOT NULL DEFAULT 1800,
-            y             INT          NOT NULL DEFAULT 1500,
-            start_visible TINYINT(1)   NOT NULL DEFAULT 0,
-            sort_order    INT          NOT NULL DEFAULT 0,
-            active        TINYINT(1)   NOT NULL DEFAULT 1,
-            created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            x             INTEGER      NOT NULL DEFAULT 1800,
+            y             INTEGER      NOT NULL DEFAULT 1500,
+            start_visible BOOLEAN      NOT NULL DEFAULT FALSE,
+            sort_order    INTEGER      NOT NULL DEFAULT 0,
+            active        BOOLEAN      NOT NULL DEFAULT TRUE,
+            created_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
             PRIMARY KEY (id, map_id)
         )""",
 
         """CREATE TABLE IF NOT EXISTS mindmap_edges (
-            id       INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            map_id   VARCHAR(32)  NOT NULL DEFAULT 'main',
-            from_id  VARCHAR(64)  NOT NULL,
-            to_id    VARCHAR(64)  NOT NULL,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_edge (map_id, from_id, to_id),
-            KEY idx_edge_from (from_id),
-            KEY idx_edge_to   (to_id)
+            id       SERIAL PRIMARY KEY,
+            map_id   VARCHAR(32) NOT NULL DEFAULT 'main',
+            from_id  VARCHAR(64) NOT NULL,
+            to_id    VARCHAR(64) NOT NULL,
+            UNIQUE (map_id, from_id, to_id)
         )""",
 
         """CREATE TABLE IF NOT EXISTS mindmap_interactions (
@@ -880,158 +835,125 @@ def init_mysql_schema():
             icon        VARCHAR(16)  NOT NULL DEFAULT '📌',
             title       VARCHAR(120) NOT NULL,
             context     TEXT         DEFAULT NULL,
-            widget_type ENUM('choice','slider','tap','bots','none') NOT NULL DEFAULT 'choice',
-            widget_json JSON         DEFAULT NULL,
+            widget_type VARCHAR(10)  NOT NULL DEFAULT 'choice'
+                        CHECK (widget_type IN ('choice','slider','tap','bots','none')),
+            widget_json JSONB        DEFAULT NULL,
             aftermath   TEXT         DEFAULT NULL,
-            media_type  ENUM('image','youtube') DEFAULT NULL,
+            media_type  VARCHAR(10)  NULL CHECK (media_type IN ('image','youtube')),
             media_url   VARCHAR(512) DEFAULT NULL,
             media_thumb VARCHAR(512) DEFAULT NULL,
-            updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            updated_at  TIMESTAMP    NOT NULL DEFAULT NOW(),
             PRIMARY KEY (node_id, map_id)
         )""",
 
         """CREATE TABLE IF NOT EXISTS mindmap_progress (
-            id        INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            user_id   INT UNSIGNED NOT NULL,
-            map_id    VARCHAR(32)  NOT NULL DEFAULT 'main',
-            node_id   VARCHAR(64)  NOT NULL,
-            viewed_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_progress (user_id, map_id, node_id),
-            KEY idx_mp_user (user_id),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            id        SERIAL PRIMARY KEY,
+            user_id   INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            map_id    VARCHAR(32) NOT NULL DEFAULT 'main',
+            node_id   VARCHAR(64) NOT NULL,
+            viewed_at TIMESTAMP   NOT NULL DEFAULT NOW(),
+            UNIQUE (user_id, map_id, node_id)
         )""",
 
         """CREATE TABLE IF NOT EXISTS mindmap_suggestions (
-            id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            user_id         INT UNSIGNED DEFAULT NULL,
+            id              SERIAL PRIMARY KEY,
+            user_id         INTEGER      DEFAULT NULL,
             map_id          VARCHAR(32)  NOT NULL DEFAULT 'main',
             label           VARCHAR(120) NOT NULL,
             reason          TEXT         DEFAULT NULL,
             connect_from_id VARCHAR(64)  DEFAULT NULL,
-            status          ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+            status          VARCHAR(10)  NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','approved','rejected')),
             admin_note      VARCHAR(255) DEFAULT NULL,
-            submitted_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            reviewed_at     DATETIME     DEFAULT NULL,
-            PRIMARY KEY (id),
-            KEY idx_ms_status (status),
-            KEY idx_ms_user   (user_id)
+            submitted_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+            reviewed_at     TIMESTAMP    DEFAULT NULL
         )""",
 
-        # ── NEW v5.0 tables ───────────────────────────────────────────────────
-
         """CREATE TABLE IF NOT EXISTS user_reflections (
-            id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            submission_id    INT UNSIGNED NULL,
-            user_id          INT UNSIGNED NULL,
+            id               SERIAL PRIMARY KEY,
+            submission_id    INTEGER      NULL,
+            user_id          INTEGER      NULL,
             session_token    VARCHAR(64)  NOT NULL,
-            stage            ENUM('post_eval','post_evidence','post_verdict')
-                                 NOT NULL DEFAULT 'post_verdict',
+            stage            VARCHAR(20)  NOT NULL DEFAULT 'post_verdict'
+                             CHECK (stage IN ('post_eval','post_evidence','post_verdict')),
             what_noticed     TEXT         NULL,
             still_uncertain  TEXT         NULL,
             would_check_next TEXT         NULL,
             free_reasoning   TEXT         NULL,
             verdict_position VARCHAR(20)  NULL,
-            bloom_level      TINYINT      NULL,
-            total_word_count INT          NULL,
-            submitted_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY idx_ur_submission (submission_id),
-            KEY idx_ur_user       (user_id),
-            KEY idx_ur_session    (session_token),
-            KEY idx_ur_stage      (stage)
+            bloom_level      SMALLINT     NULL,
+            total_word_count INTEGER      NULL,
+            submitted_at     TIMESTAMP    NOT NULL DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS confidence_snapshots (
-            id                INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            submission_id     INT UNSIGNED NULL,
-            user_id           INT UNSIGNED NULL,
-            session_token     VARCHAR(64)  NOT NULL,
-            confidence_before TINYINT      NULL,
-            confidence_after  TINYINT      NULL,
-            confidence_delta  TINYINT      NULL,
-            calibration_flag  TINYINT(1)   NOT NULL DEFAULT 0,
-            confidence_label  VARCHAR(10)  NULL,
-            recorded_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY idx_cs_submission (submission_id),
-            KEY idx_cs_user       (user_id),
-            KEY idx_cs_session    (session_token)
+            id                SERIAL PRIMARY KEY,
+            submission_id     INTEGER     NULL,
+            user_id           INTEGER     NULL,
+            session_token     VARCHAR(64) NOT NULL,
+            confidence_before SMALLINT    NULL,
+            confidence_after  SMALLINT    NULL,
+            confidence_delta  SMALLINT    NULL,
+            calibration_flag  SMALLINT    NOT NULL DEFAULT 0,
+            confidence_label  VARCHAR(10) NULL,
+            recorded_at       TIMESTAMP   NOT NULL DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS source_diversity_log (
-            id                  INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            submission_id       INT UNSIGNED NULL,
-            session_token       VARCHAR(64)  NOT NULL,
-            total_articles      INT          NOT NULL DEFAULT 0,
-            count_government    INT          NOT NULL DEFAULT 0,
-            count_academic      INT          NOT NULL DEFAULT 0,
-            count_news          INT          NOT NULL DEFAULT 0,
-            count_factcheck     INT          NOT NULL DEFAULT 0,
-            count_international INT          NOT NULL DEFAULT 0,
-            count_other         INT          NOT NULL DEFAULT 0,
-            diversity_score     FLOAT        NULL,
-            logged_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY idx_sdl_submission (submission_id),
-            KEY idx_sdl_session    (session_token)
+            id                  SERIAL PRIMARY KEY,
+            submission_id       INTEGER     NULL,
+            session_token       VARCHAR(64) NOT NULL,
+            total_articles      INTEGER     NOT NULL DEFAULT 0,
+            count_government    INTEGER     NOT NULL DEFAULT 0,
+            count_academic      INTEGER     NOT NULL DEFAULT 0,
+            count_news          INTEGER     NOT NULL DEFAULT 0,
+            count_factcheck     INTEGER     NOT NULL DEFAULT 0,
+            count_international INTEGER     NOT NULL DEFAULT 0,
+            count_other         INTEGER     NOT NULL DEFAULT 0,
+            diversity_score     FLOAT       NULL,
+            logged_at           TIMESTAMP   NOT NULL DEFAULT NOW()
         )""",
 
         """CREATE TABLE IF NOT EXISTS user_skill_history (
-            id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            user_id       INT          NULL,
-            session_token VARCHAR(64)  NULL,
-            topic         ENUM('claim_detection','source_verification','bias_detection',
-                               'evidence_evaluation','general') NOT NULL,
-            level_from    ENUM('beginner','intermediate','advanced') NULL,
-            level_to      ENUM('beginner','intermediate','advanced') NOT NULL,
-            quiz_accuracy FLOAT        NULL,
-            trigger_event VARCHAR(50)  NULL,
-            changed_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY idx_ush_user    (user_id),
-            KEY idx_ush_session (session_token),
-            KEY idx_ush_topic   (topic)
+            id            SERIAL PRIMARY KEY,
+            user_id       INTEGER     NULL,
+            session_token VARCHAR(64) NULL,
+            topic         VARCHAR(60) NOT NULL,
+            level_from    VARCHAR(20) NULL CHECK (level_from IN ('beginner','intermediate','advanced')),
+            level_to      VARCHAR(20) NOT NULL CHECK (level_to IN ('beginner','intermediate','advanced')),
+            quiz_accuracy FLOAT       NULL,
+            trigger_event VARCHAR(50) NULL,
+            changed_at    TIMESTAMP   NOT NULL DEFAULT NOW()
         )""",
 
-        # ── NEW v6.0 tables ───────────────────────────────────────────────────
-
         """CREATE TABLE IF NOT EXISTS eval_questions (
-            id             INT          NOT NULL AUTO_INCREMENT,
-            step_number    INT          NOT NULL DEFAULT 1,
+            id             SERIAL PRIMARY KEY,
+            step_number    INTEGER      NOT NULL DEFAULT 1,
             title          VARCHAR(255) NOT NULL,
+            step_label     VARCHAR(80)  NULL,
             prompt         TEXT         NOT NULL,
             hint           TEXT         NULL,
             input_type     VARCHAR(32)  NOT NULL DEFAULT 'text',
             options        TEXT         NULL,
-            is_active      TINYINT(1)   NOT NULL DEFAULT 1,
-            skip_lesson_id INT          NULL,
-            created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
-                               ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY idx_eq_step   (step_number),
-            KEY idx_eq_active (is_active)
+            is_active      SMALLINT     NOT NULL DEFAULT 1,
+            skip_lesson_id INTEGER      NULL,
+            step_link_type  VARCHAR(32) NULL,
+            step_link_value VARCHAR(512) NULL,
+            created_at     TIMESTAMP    NOT NULL DEFAULT NOW(),
+            updated_at     TIMESTAMP    NOT NULL DEFAULT NOW()
         )""",
-        # ── NEW checklist additions ───────────────────────────────────────────
 
-        # b3/m2: L6 Create task — user-authored corrective summaries and cohort-shared posts
         """CREATE TABLE IF NOT EXISTS user_created_content (
-            id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            user_id          INT UNSIGNED NULL,
-            session_token    VARCHAR(64)  NOT NULL,
-            submission_id    INT UNSIGNED NULL,
-            content_type     ENUM('corrective_summary','reflection_post','cohort_share')
-                                 NOT NULL DEFAULT 'corrective_summary',
-            body             TEXT         NOT NULL,
-            is_shared        TINYINT(1)   NOT NULL DEFAULT 0,
-            bloom_level      TINYINT      NOT NULL DEFAULT 6,
-            created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY idx_ucc_user       (user_id),
-            KEY idx_ucc_session    (session_token),
-            KEY idx_ucc_submission (submission_id),
-            KEY idx_ucc_shared     (is_shared)
+            id               SERIAL PRIMARY KEY,
+            user_id          INTEGER     NULL REFERENCES users(id) ON DELETE SET NULL,
+            session_token    VARCHAR(64) NOT NULL,
+            submission_id    INTEGER     NULL,
+            content_type     VARCHAR(30) NOT NULL DEFAULT 'corrective_summary'
+                             CHECK (content_type IN ('corrective_summary','reflection_post','cohort_share')),
+            body             TEXT        NOT NULL,
+            is_shared        SMALLINT    NOT NULL DEFAULT 0,
+            bloom_level      SMALLINT    NOT NULL DEFAULT 6,
+            created_at       TIMESTAMP   NOT NULL DEFAULT NOW()
         )""",
     ]
 
@@ -1043,185 +965,131 @@ def init_mysql_schema():
             except Exception as e:
                 logger.warning(f"[Migration] Table creation skipped: {e}")
 
-    # ── v7.0: Research consent audit log ─────────────────────────────────────
-    # Immutable per-action audit trail. Never updated or deleted.
-    # IRB requirement: proves consent was obtained and records withdrawals.
+    # ── Research consent audit log ────────────────────────────────────────────
     try:
         with engine.begin() as conn:
             conn.execute(sa.text("""
                 CREATE TABLE IF NOT EXISTS research_consent_log (
-                    id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    user_id     INT UNSIGNED NOT NULL,
-                    action      ENUM('granted','withdrawn') NOT NULL,
-                    ip_address  VARCHAR(45)  NULL,
+                    id          SERIAL PRIMARY KEY,
+                    user_id     INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    action      VARCHAR(10) NOT NULL CHECK (action IN ('granted','withdrawn')),
+                    ip_address  VARCHAR(45) NULL,
                     user_agent  VARCHAR(500) NULL,
-                    acted_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (id),
-                    INDEX idx_rcl_user (user_id),
-                    CONSTRAINT fk_rcl_user FOREIGN KEY (user_id)
-                        REFERENCES users(id) ON DELETE CASCADE
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+                    acted_at    TIMESTAMP   NOT NULL DEFAULT NOW()
+                )
             """))
         logger.info("[Migration] research_consent_log table ensured.")
     except Exception as e:
         logger.warning(f"[Migration] research_consent_log creation skipped: {e}")
 
-    # ── Safe column additions ─────────────────────────────────────────────────
+    # ── Safe column additions (PostgreSQL-compatible) ─────────────────────────
     column_migrations = [
         ("lessons", "image_url",
-         "ALTER TABLE lessons ADD COLUMN image_url VARCHAR(512) NULL AFTER content"),
+         "ALTER TABLE lessons ADD COLUMN IF NOT EXISTS image_url VARCHAR(512) NULL"),
         ("lessons", "is_published",
-         "ALTER TABLE lessons ADD COLUMN is_published TINYINT(1) NOT NULL DEFAULT 1"),
+         "ALTER TABLE lessons ADD COLUMN IF NOT EXISTS is_published SMALLINT NOT NULL DEFAULT 1"),
         ("lessons", "updated_at",
-         "ALTER TABLE lessons ADD COLUMN updated_at DATETIME NOT NULL "
-         "DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+         "ALTER TABLE lessons ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()"),
         ("lessons", "mil_skill",
-         "ALTER TABLE lessons ADD COLUMN mil_skill VARCHAR(50) NULL"),
+         "ALTER TABLE lessons ADD COLUMN IF NOT EXISTS mil_skill VARCHAR(50) NULL"),
         ("lessons", "sort_order",
-         "ALTER TABLE lessons ADD COLUMN sort_order INT NULL"),
+         "ALTER TABLE lessons ADD COLUMN IF NOT EXISTS sort_order INTEGER NULL"),
         ("lessons", "prerequisite_lesson_id",
-         "ALTER TABLE lessons ADD COLUMN prerequisite_lesson_id INT NULL"),
+         "ALTER TABLE lessons ADD COLUMN IF NOT EXISTS prerequisite_lesson_id INTEGER NULL"),
         ("quiz_questions", "difficulty",
-         "ALTER TABLE quiz_questions ADD COLUMN difficulty "
-         "ENUM('beginner','intermediate','advanced') NULL DEFAULT 'beginner'"),
+         "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS difficulty VARCHAR(20) NULL DEFAULT 'beginner'"),
         ("quiz_questions", "image_url",
-         "ALTER TABLE quiz_questions ADD COLUMN image_url VARCHAR(512) NULL"),
+         "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS image_url VARCHAR(512) NULL"),
         ("quiz_questions", "video_url",
-         "ALTER TABLE quiz_questions ADD COLUMN video_url VARCHAR(1024) NULL"),
+         "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS video_url VARCHAR(1024) NULL"),
         ("quiz_questions", "media_type",
-         "ALTER TABLE quiz_questions ADD COLUMN media_type ENUM('text','image','video','file') NULL DEFAULT 'text'"),
+         "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS media_type VARCHAR(10) NULL DEFAULT 'text'"),
         ("quiz_questions", "hint",
-         "ALTER TABLE quiz_questions ADD COLUMN hint TEXT NULL"),
+         "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS hint TEXT NULL"),
         ("lesson_topics", "quiz_limit",
-         "ALTER TABLE lesson_topics ADD COLUMN quiz_limit INT NULL COMMENT 'Max quiz questions per session; NULL = no limit'"),
+         "ALTER TABLE lesson_topics ADD COLUMN IF NOT EXISTS quiz_limit INTEGER NULL"),
         ("pretest_results", "days_between",
-         "ALTER TABLE pretest_results ADD COLUMN days_between FLOAT NULL COMMENT 'Days between pretest and posttest for longitudinal pairing'"),
+         "ALTER TABLE pretest_results ADD COLUMN IF NOT EXISTS days_between FLOAT NULL"),
         ("pretest_results", "score_gain_pct",
-         "ALTER TABLE pretest_results ADD COLUMN score_gain_pct FLOAT NULL COMMENT 'score_pct(posttest) - score_pct(pretest)'"),
+         "ALTER TABLE pretest_results ADD COLUMN IF NOT EXISTS score_gain_pct FLOAT NULL"),
         ("users", "is_verified",
-         "ALTER TABLE users ADD COLUMN is_verified TINYINT(1) NOT NULL DEFAULT 0"),
-        # ── v7.0: IRB research consent fields ─────────────────────────────────
+         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified SMALLINT NOT NULL DEFAULT 0"),
         ("users", "research_consent",
-         "ALTER TABLE users ADD COLUMN research_consent TINYINT(1) NOT NULL DEFAULT 0"),
+         "ALTER TABLE users ADD COLUMN IF NOT EXISTS research_consent SMALLINT NOT NULL DEFAULT 0"),
         ("users", "research_consent_at",
-         "ALTER TABLE users ADD COLUMN research_consent_at DATETIME NULL"),
+         "ALTER TABLE users ADD COLUMN IF NOT EXISTS research_consent_at TIMESTAMP NULL"),
         ("users", "consent_withdrawn_at",
-         "ALTER TABLE users ADD COLUMN consent_withdrawn_at DATETIME NULL"),
+         "ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_withdrawn_at TIMESTAMP NULL"),
         ("eval_questions", "step_label",
-         "ALTER TABLE eval_questions ADD COLUMN step_label VARCHAR(80) NULL"),
+         "ALTER TABLE eval_questions ADD COLUMN IF NOT EXISTS step_label VARCHAR(80) NULL"),
         ("eval_questions", "step_link_type",
-         "ALTER TABLE eval_questions ADD COLUMN step_link_type VARCHAR(32) NULL"),
+         "ALTER TABLE eval_questions ADD COLUMN IF NOT EXISTS step_link_type VARCHAR(32) NULL"),
         ("eval_questions", "step_link_value",
-         "ALTER TABLE eval_questions ADD COLUMN step_link_value VARCHAR(512) NULL"),
-        # ── v9.0: Follow-up branch full parity + nesting ──────────────────────
+         "ALTER TABLE eval_questions ADD COLUMN IF NOT EXISTS step_link_value VARCHAR(512) NULL"),
         ("eval_question_branches", "parent_branch_id",
-         "ALTER TABLE eval_question_branches ADD COLUMN parent_branch_id INT NULL "
-         "COMMENT 'FK → eval_question_branches.id; NULL = top-level branch'"),
+         "ALTER TABLE eval_question_branches ADD COLUMN IF NOT EXISTS parent_branch_id INTEGER NULL"),
         ("eval_question_branches", "input_type",
-         "ALTER TABLE eval_question_branches ADD COLUMN input_type VARCHAR(32) NULL DEFAULT 'none' "
-         "COMMENT 'none|text|textarea|multiple_choice|yes_no|scale|checkbox'"),
+         "ALTER TABLE eval_question_branches ADD COLUMN IF NOT EXISTS input_type VARCHAR(32) NULL DEFAULT 'none'"),
         ("eval_question_branches", "options",
-         "ALTER TABLE eval_question_branches ADD COLUMN options TEXT NULL "
-         "COMMENT 'JSON [{value,label},...] for multiple_choice / checkbox / yes_no'"),
+         "ALTER TABLE eval_question_branches ADD COLUMN IF NOT EXISTS options TEXT NULL"),
         ("eval_question_branches", "scale_min_label",
-         "ALTER TABLE eval_question_branches ADD COLUMN scale_min_label VARCHAR(100) NULL"),
+         "ALTER TABLE eval_question_branches ADD COLUMN IF NOT EXISTS scale_min_label VARCHAR(100) NULL"),
         ("eval_question_branches", "scale_max_label",
-         "ALTER TABLE eval_question_branches ADD COLUMN scale_max_label VARCHAR(100) NULL"),
+         "ALTER TABLE eval_question_branches ADD COLUMN IF NOT EXISTS scale_max_label VARCHAR(100) NULL"),
         ("eval_question_branches", "image_url",
-         "ALTER TABLE eval_question_branches ADD COLUMN image_url VARCHAR(512) NULL "
-         "COMMENT 'Direct image URL for content_type=image'"),
+         "ALTER TABLE eval_question_branches ADD COLUMN IF NOT EXISTS image_url VARCHAR(512) NULL"),
         ("eval_question_branches", "file_url",
-         "ALTER TABLE eval_question_branches ADD COLUMN file_url VARCHAR(512) NULL "
-         "COMMENT 'File download URL for content_type=file'"),
+         "ALTER TABLE eval_question_branches ADD COLUMN IF NOT EXISTS file_url VARCHAR(512) NULL"),
         ("eval_question_branches", "file_name",
-         "ALTER TABLE eval_question_branches ADD COLUMN file_name VARCHAR(255) NULL "
-         "COMMENT 'Display filename for content_type=file'"),
+         "ALTER TABLE eval_question_branches ADD COLUMN IF NOT EXISTS file_name VARCHAR(255) NULL"),
         ("eval_question_branches", "link_label",
-         "ALTER TABLE eval_question_branches ADD COLUMN link_label VARCHAR(255) NULL "
-         "COMMENT 'Button label for content_type=url'"),
-        # ── v10.0: mindmap_node_id unlock hooks ───────────────────────────────
-        ("quiz_questions", "mindmap_node_id",
-         "ALTER TABLE quiz_questions ADD COLUMN mindmap_node_id VARCHAR(64) NULL "
-         "COMMENT 'FK → mindmap_nodes.id; correct answer unlocks this node'"),
-        ("lessons", "mindmap_node_id",
-         "ALTER TABLE lessons ADD COLUMN mindmap_node_id VARCHAR(64) NULL "
-         "COMMENT 'FK → mindmap_nodes.id; reading this lesson unlocks this node'"),
-        ("eval_questions", "mindmap_node_id",
-         "ALTER TABLE eval_questions ADD COLUMN mindmap_node_id VARCHAR(64) NULL "
-         "COMMENT 'FK → mindmap_nodes.id; completing this eval step unlocks this node'"),
+         "ALTER TABLE eval_question_branches ADD COLUMN IF NOT EXISTS link_label VARCHAR(255) NULL"),
     ]
 
     with engine.connect() as conn:
         for table, column, sql in column_migrations:
             try:
-                result = conn.execute(sa.text(
-                    "SELECT COUNT(*) FROM information_schema.columns "
-                    "WHERE table_schema = DATABASE() "
-                    f"AND table_name = '{table}' AND column_name = '{column}'"
-                ))
-                if result.scalar() == 0:
-                    conn.execute(sa.text(sql))
-                    conn.commit()
-                    logger.info(f"[Migration] Added column '{column}' to '{table}'")
+                conn.execute(sa.text(sql))
+                conn.commit()
+                logger.info(f"[Migration] Ensured column '{column}' on '{table}'")
             except Exception as e:
                 logger.warning(f"[Migration] {table}.{column}: {e}")
 
-    enum_migrations = [
-        """ALTER TABLE submissions
-           MODIFY COLUMN input_type ENUM('text','url','image','pdf','file')
-           NOT NULL DEFAULT 'text'""",
-    ]
-
-    with engine.connect() as conn:
-        for sql in enum_migrations:
-            try:
-                conn.execute(sa.text(sql))
-                conn.commit()
-            except Exception as e:
-                logger.warning(f"[Migration] Enum expand skipped: {e}")
-
-    # ── v8.0: Admin audit log ─────────────────────────────────────────────────
-    # Immutable per-action trail for every admin mutation. Never updated/deleted.
+    # ── Admin audit log ───────────────────────────────────────────────────────
     try:
         with engine.begin() as conn:
             conn.execute(sa.text("""
                 CREATE TABLE IF NOT EXISTS admin_audit_log (
-                    id             INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    admin_id       INT UNSIGNED NULL,
-                    admin_username VARCHAR(50)  NULL,
-                    action         ENUM('create','update','delete','role_change','upload','reorder') NOT NULL,
+                    id             SERIAL PRIMARY KEY,
+                    admin_id       INTEGER     NULL REFERENCES users(id) ON DELETE SET NULL,
+                    admin_username VARCHAR(50) NULL,
+                    action         VARCHAR(20) NOT NULL
+                                   CHECK (action IN ('create','update','delete','role_change','upload','reorder')),
                     resource_type  VARCHAR(50)  NOT NULL,
                     resource_id    VARCHAR(100) NULL,
                     detail         TEXT         NULL,
                     ip_address     VARCHAR(45)  NULL,
-                    performed_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (id),
-                    INDEX idx_aal_admin       (admin_id),
-                    INDEX idx_aal_resource    (resource_type, resource_id),
-                    INDEX idx_aal_performed   (performed_at),
-                    CONSTRAINT fk_aal_admin FOREIGN KEY (admin_id)
-                        REFERENCES users(id) ON DELETE SET NULL
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+                    performed_at   TIMESTAMP    NOT NULL DEFAULT NOW()
+                )
             """))
         logger.info("[Migration] admin_audit_log table ensured.")
     except Exception as e:
         logger.warning(f"[Migration] admin_audit_log creation skipped: {e}")
 
-    # ── v9.0: Dynamic topic registry ─────────────────────────────────────────
+    # ── Dynamic topic registry ────────────────────────────────────────────────
     try:
         with engine.begin() as conn:
             conn.execute(sa.text("""
                 CREATE TABLE IF NOT EXISTS lesson_topics (
-                    id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    `key`      VARCHAR(60)  NOT NULL,
+                    id         SERIAL PRIMARY KEY,
+                    key        VARCHAR(60)  NOT NULL UNIQUE,
                     label      VARCHAR(100) NOT NULL,
                     icon       VARCHAR(10)  NOT NULL DEFAULT '📄',
                     color_hue  SMALLINT     NOT NULL DEFAULT 220,
-                    sort_order INT          NOT NULL DEFAULT 0,
-                    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (id),
-                    UNIQUE KEY uq_topic_key (`key`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    sort_order INTEGER      NOT NULL DEFAULT 0,
+                    quiz_limit INTEGER      NULL,
+                    created_at TIMESTAMP    NOT NULL DEFAULT NOW()
+                )
             """))
         logger.info("[Migration] lesson_topics table ensured.")
     except Exception as e:
@@ -1233,7 +1101,7 @@ def init_mysql_schema():
             count = conn.execute(sa.text("SELECT COUNT(*) FROM lesson_topics")).scalar()
             if count == 0:
                 conn.execute(sa.text("""
-                    INSERT INTO lesson_topics (`key`, label, icon, color_hue, sort_order) VALUES
+                    INSERT INTO lesson_topics (key, label, icon, color_hue, sort_order) VALUES
                     ('claim_detection',    'Claim Detection',    '🎯', 220, 1),
                     ('source_verification','Source Verification','🔍', 158, 2),
                     ('bias_detection',     'Bias Detection',     '⚡',  38, 3),
@@ -1244,44 +1112,18 @@ def init_mysql_schema():
     except Exception as e:
         logger.warning(f"[Migration] lesson_topics seeding skipped: {e}")
 
-    # ── topic_quiz_links: explicit per-topic quiz question list ───────────────
+    # ── topic_quiz_links ──────────────────────────────────────────────────────
     try:
         with engine.begin() as conn:
             conn.execute(sa.text("""
                 CREATE TABLE IF NOT EXISTS topic_quiz_links (
-                    id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    topic_key   VARCHAR(60)  NOT NULL,
-                    question_id INT          NOT NULL,
-                    PRIMARY KEY (id),
-                    UNIQUE KEY uq_tql (topic_key, question_id),
-                    INDEX idx_tql_topic (topic_key),
-                    INDEX idx_tql_qid   (question_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    id          SERIAL PRIMARY KEY,
+                    topic_key   VARCHAR(60) NOT NULL,
+                    question_id INTEGER     NOT NULL,
+                    UNIQUE (topic_key, question_id)
+                )
             """))
         logger.info("[Migration] topic_quiz_links table ensured.")
     except Exception as e:
         logger.warning(f"[Migration] topic_quiz_links creation skipped: {e}")
 
-    # Migrate ENUM → VARCHAR(60) so any topic key is accepted
-    enum_to_varchar = [
-        ("lessons",            "topic", "VARCHAR(60) NOT NULL"),
-        ("quiz_questions",     "topic", "VARCHAR(60) NOT NULL"),
-        ("user_skill_progress","topic", "VARCHAR(60) NOT NULL"),
-        ("user_skill_history", "topic", "VARCHAR(60) NOT NULL"),
-    ]
-    with engine.connect() as conn:
-        for table, column, col_def in enum_to_varchar:
-            try:
-                col_type = conn.execute(sa.text(
-                    "SELECT DATA_TYPE FROM information_schema.columns "
-                    "WHERE table_schema = DATABASE() "
-                    f"AND table_name = '{table}' AND column_name = '{column}'"
-                )).scalar()
-                if col_type and col_type.upper() == "ENUM":
-                    conn.execute(sa.text(
-                        f"ALTER TABLE `{table}` MODIFY COLUMN `{column}` {col_def}"
-                    ))
-                    conn.commit()
-                    logger.info(f"[Migration] {table}.{column} ENUM → VARCHAR(60)")
-            except Exception as e:
-                logger.warning(f"[Migration] {table}.{column} varchar migration skipped: {e}")

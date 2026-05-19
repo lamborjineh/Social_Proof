@@ -8,7 +8,7 @@ Usage:
     python seed_admin.py --username admin --email me@example.com --password YourStrongPassword123
 
 Requirements:
-    pip install bcrypt pymysql python-dotenv
+    pip install bcrypt psycopg2-binary python-dotenv
 
 The script reads DATABASE_URL from your .env (same as the FastAPI app),
 so run it from the project root where .env lives.
@@ -29,7 +29,7 @@ import os
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "mysql+pymysql://user:password@localhost/socialproof_db",
+    "postgresql+psycopg2://user:password@localhost/socialproof_db",
 )
 
 
